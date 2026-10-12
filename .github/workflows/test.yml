@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  test-pem:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,66 +25,82 @@ jobs:
           python-version: "3.12"
       - name: Install Python backend
         run: pip install cryptography
-      - name: Generate throwaway issuer key (PEM via receipt.py keygen)
+      - name: Generate throwaway issuer key
         env:
           OPENRECEIPTS_HOME: ${{ runner.temp }}/.openreceipts
         run: python3 openreceipts/receipt.py keygen --issuer ci-test
-      - name: Sign with the action (PEM key, full input)
-        id: sign-pem
+      - name: Sign release receipt with the action (PEM key)
+        id: sign
         env:
           OPENRECEIPTS_KEY: ${{ runner.temp }}/.openreceipts/ci-test.key
           GH_REPO: auroraxo/openreceipts-action
           RELEASE_TAG: v9.9.9-test
           RELEASE_URL: https://github.com/auroraxo/openreceipts-action/releases/tag/v9.9.9-test
         run: node action/sign.mjs
-      - name: Verify PEM-keyed receipt with Python reference
+      - name: Verify with Python reference
         run: python3 openreceipts/receipt.py verify receipts/release-v9.9.9-test.json --key ${{ runner.temp }}/.openreceipts/ci-test.pub
-      - name: Verify PEM-keyed receipt with Node reference
+      - name: Verify with Node reference
         run: node openreceipts/verify.mjs --key ${{ runner.temp }}/.openreceipts/ci-test.pub receipts/release-v9.9.9-test.json
-      - name: Sign with raw 32-byte seed key
-        id: sign-raw
-        env:
-          GH_REPO: auroraxo/openreceipts-action
-          RELEASE_TAG: v8.8.8-test
-          INPUT_PATH: receipts/raw-seed.json
+      - name: "Self-check - embedded pubkey matches loaded key"
         run: |
-          SEED=$(python3 - <<'PY'
-          import base64, os, pathlib
-          pem = pathlib.Path(os.environ['RUNNER_TEMP'] + '/.openreceipts/ci-test.key')
-          der = base64.b64decode(''.join(l for l in pem.read_text().splitlines() if not l.startswith('-----')))
-          print(base64.b64encode(der[-32:]).decode())
-          PY
-          )
-          export OPENRECEIPTS_KEY="$SEED"
-          node action/sign.mjs
-      - name: Verify raw-seed-keyed receipt with Python reference
-        run: python3 openreceipts/receipt.py verify receipts/raw-seed.json --key ${{ runner.temp }}/.openreceipts/ci-test.pub
-      - name: Verify raw-seed-keyed receipt with Node reference
-        run: node openreceipts/verify.mjs --key ${{ runner.temp }}/.openreceipts/ci-test.pub receipts/raw-seed.json
-      - name: Self-check: derived pubkey matches what we loaded
-        env:
-          OPENRECEIPTS_HOME: ${{ runner.temp }}/.openreceipts
-        run: |
-          python3 - <<'PY'
+          python3 -c "
           import base64, json, os, pathlib
-          pub_in = pathlib.Path(os.environ['RUNNER_TEMP'] + '/.openreceipts/ci-test.pub').read_text().strip()
-          for fname in ('receipts/release-v9.9.9-test.json', 'receipts/raw-seed.json'):
-              doc = json.loads(pathlib.Path(fname).read_text())
-              assert doc['pubkey'] == pub_in, f"pubkey mismatch in {fname}: {doc['pubkey']} vs {pub_in}"
-              print(f"OK  {fname} pubkey == loaded key")
-          PY
+          pub = pathlib.Path(os.environ['RUNNER_TEMP'] + '/.openreceipts/ci-test.pub').read_text().strip()
+          doc = json.loads(pathlib.Path('receipts/release-v9.9.9-test.json').read_text())
+          assert doc['pubkey'] == pub, 'pubkey mismatch: ' + doc['pubkey'] + ' vs ' + pub
+          print('pubkey OK')
+          "
       - name: Tamper must fail
         run: |
-          python3 - <<'PY'
+          python3 -c "
           import json, pathlib
           p = pathlib.Path('receipts/release-v9.9.9-test.json')
           doc = json.loads(p.read_text())
           doc['receipt']['claims']['version'] = 'v0.0.1-tampered'
           pathlib.Path('receipts/tampered.json').write_text(json.dumps(doc))
-          PY
+          "
           if python3 openreceipts/receipt.py verify receipts/tampered.json; then
             echo "FAIL: tampered receipt verified"; exit 1
           fi
           if node openreceipts/verify.mjs receipts/tampered.json; then
             echo "FAIL: tampered receipt verified (node)"; exit 1
           fi
+
+  test-raw-seed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: action
+      - name: Checkout reference implementation
+        uses: actions/checkout@v4
+        with:
+          repository: auroraxo/openreceipts
+          path: openreceipts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python backend
+        run: pip install cryptography
+      - name: Generate throwaway issuer key
+        env:
+          OPENRECEIPTS_HOME: ${{ runner.temp }}/.openreceipts
+        run: python3 openreceipts/receipt.py keygen --issuer raw-test
+      - name: Print raw 32-byte seed
+        run: |
+          python3 scripts/print-raw-seed.py "$RUNNER_TEMP/.openreceipts/raw-test.key" > /tmp/seed.b64
+          cat /tmp/seed.b64
+      - name: Sign with raw 32-byte seed key
+        env:
+          OPENRECEIPTS_KEY: /tmp/seed.b64
+          GH_REPO: auroraxo/openreceipts-action
+          RELEASE_TAG: v8.8.8-test
+          INPUT_PATH: receipts/raw-seed.json
+        run: node action/sign.mjs
+      - name: Verify raw-seed-keyed receipt with Python reference
+        run: python3 openreceipts/receipt.py verify receipts/raw-seed.json --key ${{ runner.temp }}/.openreceipts/raw-test.pub
+      - name: Verify raw-seed-keyed receipt with Node reference
+        run: node openreceipts/verify.mjs --key ${{ runner.temp }}/.openreceipts/raw-test.pub receipts/raw-seed.json
