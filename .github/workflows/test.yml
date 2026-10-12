@@ -32,11 +32,12 @@ jobs:
       - name: Sign release receipt with the action (PEM key)
         id: sign
         env:
-          OPENRECEIPTS_KEY: ${{ runner.temp }}/.openreceipts/ci-test.key
           GH_REPO: auroraxo/openreceipts-action
           RELEASE_TAG: v9.9.9-test
           RELEASE_URL: https://github.com/auroraxo/openreceipts-action/releases/tag/v9.9.9-test
-        run: node action/sign.mjs
+        run: |
+          export OPENRECEIPTS_KEY="$(cat "$RUNNER_TEMP/.openreceipts/ci-test.key")"
+          node action/sign.mjs
       - name: Verify with Python reference
         run: python3 openreceipts/receipt.py verify receipts/release-v9.9.9-test.json --key ${{ runner.temp }}/.openreceipts/ci-test.pub
       - name: Verify with Node reference
@@ -91,7 +92,7 @@ jobs:
         run: python3 openreceipts/receipt.py keygen --issuer raw-test
       - name: Print raw 32-byte seed
         run: |
-          python3 scripts/print-raw-seed.py "$RUNNER_TEMP/.openreceipts/raw-test.key" > /tmp/seed.b64
+          python3 action/scripts/print-raw-seed.py "$RUNNER_TEMP/.openreceipts/raw-test.key" > /tmp/seed.b64
           cat /tmp/seed.b64
       - name: Sign with raw 32-byte seed key
         env:
