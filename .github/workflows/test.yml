@@ -96,11 +96,12 @@ jobs:
           cat /tmp/seed.b64
       - name: Sign with raw 32-byte seed key
         env:
-          OPENRECEIPTS_KEY: /tmp/seed.b64
           GH_REPO: auroraxo/openreceipts-action
           RELEASE_TAG: v8.8.8-test
           INPUT_PATH: receipts/raw-seed.json
-        run: node action/sign.mjs
+        run: |
+          export OPENRECEIPTS_KEY="$(cat /tmp/seed.b64)"
+          node action/sign.mjs
       - name: Verify raw-seed-keyed receipt with Python reference
         run: python3 openreceipts/receipt.py verify receipts/raw-seed.json --key ${{ runner.temp }}/.openreceipts/raw-test.pub
       - name: Verify raw-seed-keyed receipt with Node reference
