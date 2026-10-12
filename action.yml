@@ -1,0 +1,55 @@
+name: "openreceipts release receipt"
+description: "Sign an openreceipts/v1 receipt for a published release (BYO Ed25519 key, zero config)."
+author: "auroraxo"
+branding:
+  icon: "file-text"
+  color: "green"
+
+inputs:
+  key:
+    description: >
+      Ed25519 private key: PEM PKCS8 (output of `receipt.py keygen`) or
+      base64 raw 32-byte seed. Store it as a repository secret.
+    required: true
+  issuer:
+    description: "Receipt issuer (default: repository owner)."
+    required: false
+    default: ""
+  path:
+    description: "Where to write the receipt file (default: receipts/release-<tag>.json)."
+    required: false
+    default: ""
+  upload:
+    description: "Upload the receipt as a release asset (true/false)."
+    required: false
+    default: "true"
+
+outputs:
+  receipt-path:
+    description: "Path of the signed receipt file."
+    value: ${{ steps.sign.outputs.receipt-path }}
+  pubkey:
+    description: "base64 Ed25519 public key for this issuer (publish it to make receipts pinnable)."
+    value: ${{ steps.sign.outputs.pubkey }}
+
+runs:
+  using: composite
+  steps:
+    - id: sign
+      shell: bash
+      env:
+        OPENRECEIPTS_KEY: ${{ inputs.key }}
+        INPUT_ISSUER: ${{ inputs.issuer }}
+        INPUT_PATH: ${{ inputs.path }}
+        GH_REPO: ${{ github.repository }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+        RELEASE_URL: ${{ github.event.release.html_url }}
+      run: node "$GITHUB_ACTION_PATH/sign.mjs"
+    - name: Upload receipt as release asset
+      if: ${{ inputs.upload == 'true' && github.event_name == 'release' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RECEIPT_PATH: ${{ steps.sign.outputs.receipt-path }}
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: gh release upload "$RELEASE_TAG" "$RECEIPT_PATH" --clobber
